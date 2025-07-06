@@ -3,7 +3,24 @@
 use std::io::{Read, Seek, SeekFrom};
 use md5;
 
-pub fn calculate_nds_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+pub fn get_hash_function(system: &str) -> Option<fn(&str) -> Result<String, Box<dyn std::error::Error>>> {
+    match system {
+        "nds" => Some(calculate_nds_file_hash),
+        "gba" => Some(calculate_whole_file_hash),
+        _ => None,
+    }
+}
+
+fn calculate_whole_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut file = std::fs::File::open(file_path)?;
+    let mut hasher = md5::Context::new();
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    hasher.consume(&buffer);
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn calculate_nds_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     // A NDS ROM has a 0x160 byte header. In this header are pointers to icon/title information and to the boot code for both processors.
     // The hash method combines the header, the two pieces of boot code, and the icon/title information and hashes the result.
     // The icon/title information is 0xA00 bytes starting at the address stored in the header at $68
