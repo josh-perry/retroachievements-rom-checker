@@ -1,9 +1,9 @@
-use std::io::{Read, Seek, SeekFrom};
-use md5;
 use toml;
 
 use rust_fuzzy_search::{fuzzy_search_best_n};
 use serde::{Deserialize, Serialize};
+
+mod rom_hashes;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct UserConfig {
@@ -74,40 +74,6 @@ fn download_game_list_for_system(http_client: &reqwest::blocking::Client, api_ke
     return Ok(());
 }
 
-fn calculate_nds_file_hash(file_path: &str) -> String {
-    let mut file = std::fs::File::open(file_path).expect("Unable to open file");
-
-    let mut header = [0u8; 0x160];
-    file.read_exact(&mut header).expect("Unable to read header");
-
-    let icon_title_offset = u32::from_le_bytes(header[0x68..0x6C].try_into().expect("Invalid slice length")) as usize;
-    let arm9_offset = u32::from_le_bytes(header[0x20..0x24].try_into().expect("Invalid slice length")) as usize;
-    let arm9_size = u32::from_le_bytes(header[0x2C..0x30].try_into().expect("Invalid slice length")) as usize;
-
-    let arm7_offset = u32::from_le_bytes(header[0x30..0x34].try_into().expect("Invalid slice length")) as usize;
-    let arm7_size = u32::from_le_bytes(header[0x3C..0x40].try_into().expect("Invalid slice length")) as usize;
-
-    let mut icon_title_data = vec![0u8; 0xA00];
-    file.seek(SeekFrom::Start(icon_title_offset as u64)).expect("Unable to seek to icon/title data");
-    file.read_exact(&mut icon_title_data).expect("Unable to read icon/title data");
-
-    let mut arm9_data = vec![0u8; arm9_size];
-    file.seek(SeekFrom::Start(arm9_offset as u64)).expect("Unable to seek to arm9 data");
-    file.read_exact(&mut arm9_data).expect("Unable to read arm9 data");
-
-    let mut arm7_data = vec![0u8; arm7_size];
-    file.seek(SeekFrom::Start(arm7_offset as u64)).expect("Unable to seek to arm7 data");
-    file.read_exact(&mut arm7_data).expect("Unable to read arm7 data");
-
-    let mut hasher = md5::Context::new();
-    hasher.consume(&header);
-    hasher.consume(&arm9_data);
-    hasher.consume(&arm7_data);
-    hasher.consume(&icon_title_data);
-
-    format!("{:x}", hasher.finalize())
-}
-
 fn main() {
     let user_config = get_user_config();
 
@@ -136,7 +102,7 @@ fn main() {
         if path.is_file() {
             let rom = Rom {
                 file_name: path.file_name().unwrap().to_str().unwrap().to_string(),
-                hash: calculate_nds_file_hash(path.to_str().unwrap()),
+                hash: rom_hashes::calculate_nds_file_hash(path.to_str().unwrap()).expect("Failed to calculate hash"),
                 matched_game: None,
             };
 
