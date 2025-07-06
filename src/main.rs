@@ -1,4 +1,5 @@
 use toml;
+use tabled::{Table, settings::Style, Tabled};
 
 use rust_fuzzy_search::{fuzzy_search_best_n};
 use serde::{Deserialize, Serialize};
@@ -51,7 +52,7 @@ struct RAGameResponse {
 
 struct Rom<'a> {
     file_name: String,
-    hash: String,
+    hash: Option<String>,
     matched_game: Option<&'a RAGameResponse>,
 }
 
@@ -72,6 +73,18 @@ fn download_game_list_for_system(http_client: &reqwest::blocking::Client, api_ke
     std::fs::write(&file_name, &response).expect("Unable to write file");
 
     return Ok(());
+}
+
+#[derive(Tabled)]
+struct TableRecord {
+    #[tabled(rename = "ROM Name")]
+    rom_name: String,
+
+    #[tabled(rename = "Matched RA Game")]
+    matched_game: String,
+
+    #[tabled(rename = "Hash Match")]
+    hash_status: String,
 }
 
 fn main() {
@@ -102,7 +115,10 @@ fn main() {
         if path.is_file() {
             let rom = Rom {
                 file_name: path.file_name().unwrap().to_str().unwrap().to_string(),
-                hash: rom_hashes::calculate_nds_file_hash(path.to_str().unwrap()).expect("Failed to calculate hash"),
+                hash: match rom_hashes::calculate_nds_file_hash(path.to_str().unwrap()) {
+                    Ok(hash) => Some(hash),
+                    Err(_) => None
+                },
                 matched_game: None,
             };
 
@@ -110,7 +126,7 @@ fn main() {
         }
     }
 
-    for mut rom in roms {
+    for mut rom in &mut roms {
         println!("Checking ROM: {}", rom.file_name);
 
         let search_results: Vec<(&str, f32)> = fuzzy_search_best_n(&rom.file_name, &game_titles, 1);
@@ -127,10 +143,8 @@ fn main() {
 
                 rom.matched_game = Some(game);
                 
-                println!("{}", rom.hash);
-
                 for hash in &game.hashes {
-                    if rom.hash == *hash {
+                    if rom.hash == Some(hash.clone()) {
                         println!("\tExact match found for game: {} with hash {}", title, hash);
                         break 'search;
                     }
@@ -140,4 +154,21 @@ fn main() {
             }
         }
     }
+
+    let table_records: Vec<TableRecord> = roms.iter()
+    .map(|rom| TableRecord {
+        rom_name: rom.file_name.clone(),
+        matched_game: match &rom.matched_game {
+            Some(game) => format!("{} (ID: {})", game.title, game.id),
+            None => "".to_string(),
+        },
+        hash_status: match &rom.hash {
+            Some(_) => "✅".to_string(),
+            None => "❌".to_string(),
+        },
+    }).collect();
+
+    let mut table = Table::new(table_records);
+    table.with(Style::modern());
+    println!("{}", table);
 }
