@@ -15,6 +15,21 @@ pub fn get_hash_function(system: &str) -> Option<fn(&str) -> Result<String, Box<
 }
 
 fn calculate_whole_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    if file_path.ends_with(".zip") {
+        // get first file from zip
+        let mut zip_file_archive = zip::ZipArchive::new(File::open(file_path)?)?;
+        if zip_file_archive.len() == 0 {
+            return Err("ZIP archive is empty".into());
+        }
+
+        let mut first_file = zip_file_archive.by_index(0)?;
+        let mut buffer = Vec::new();
+        first_file.read_to_end(&mut buffer)?;
+        let mut hasher = md5::Context::new();
+        hasher.consume(&buffer);
+        return Ok(format!("{:x}", hasher.finalize()));
+    }
+
     let mut file = File::open(file_path)?;
     let mut hasher = md5::Context::new();
     let mut buffer = Vec::new();
