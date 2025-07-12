@@ -144,6 +144,8 @@ fn main() {
         ("nds", 18),
         ("gba", 5),
         ("gbc", 6),
+        ("wonderswan", 53),
+        ("wonderswancolor", 53)
     ]);
 
     // Download game lists for each system

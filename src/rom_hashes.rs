@@ -10,6 +10,10 @@ pub fn get_hash_function(system: &str) -> Option<fn(&str) -> Result<String, Box<
     match system {
         "nds" => Some(calculate_nds_file_hash),
         "gba" => Some(calculate_whole_file_hash),
+        "gbc" => Some(calculate_whole_file_hash),
+        "gb" => Some(calculate_whole_file_hash),
+        "wonderswan" => Some(calculate_whole_file_hash),
+        "wonderswancolor" => Some(calculate_whole_file_hash),
         _ => None,
     }
 }
