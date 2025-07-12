@@ -69,7 +69,7 @@ struct Rom<'a> {
     hash: Option<String>,
     matched_game: Option<&'a RAGameResponse>,
     hash_matches: bool,
-    system_id: Option<i32>,
+    system_id: Option<u32>,
 }
 
 fn download_game_list_for_system(http_client: &reqwest::blocking::Client, api_key: &str, system_id: u32) -> Result<(), reqwest::Error> {
@@ -110,6 +110,8 @@ fn download_game_system_ids(http_client: &reqwest::blocking::Client, api_key: &s
 struct TableRecord {
     #[tabled(rename = "Filename")]
     rom_name: String,
+
+    system: String,
 
     #[tabled(rename = "RA game")]
     matched_game: String,
@@ -187,6 +189,11 @@ fn main() {
                 }
             };
 
+            if system_name_to_id.get(system_string).is_none() {
+                eprintln!("System '{}' is not supported. Skipping file: {}", system_string, path.display());
+                continue;
+            }
+
             let rom = Rom {
                 file_name: path.file_name().unwrap().to_str().unwrap().to_string(),
                 hash: match hashing_function(path.to_str().unwrap()) {
@@ -255,6 +262,13 @@ fn main() {
             true => "✅".to_string(),
             false => "❌".to_string(),
         },
+        system: match rom.system_id {
+            Some(id) => {
+                system_ids.iter().find(|system| system.id == id)
+                    .map_or("Unknown".to_string(), |system| system.name.clone())
+            },
+            None => "Unknown".to_string(),
+        }
     }).collect();
 
     let mut table = Table::new(table_records);
