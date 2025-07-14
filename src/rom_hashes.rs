@@ -3,24 +3,23 @@
 use std::{fs::{File}, io::{Read, Seek, SeekFrom}};
 use md5;
 
+use crate::system;
+
 trait ReadSeek: Read + Seek {}
 impl<T: Read + Seek> ReadSeek for T {}
 
-pub fn get_hash_function(system: &str) -> Option<fn(&str) -> Result<String, Box<dyn std::error::Error>>> {
+pub fn get_hash_function(system: &system::System) -> Option<fn(&str) -> Result<String, Box<dyn std::error::Error>>> {
     match system {
-        "nds" => Some(calculate_nds_file_hash),
-        "gba" => Some(calculate_whole_file_hash),
-        "gbc" => Some(calculate_whole_file_hash),
-        "gb" => Some(calculate_whole_file_hash),
-        "wonderswan" => Some(calculate_whole_file_hash),
-        "wonderswancolor" => Some(calculate_whole_file_hash),
-        _ => None,
+        system::System::NDS => Some(calculate_nds_file_hash),
+        system::System::GBA => Some(calculate_whole_file_hash),
+        system::System::GBC => Some(calculate_whole_file_hash),
+        system::System::GB => Some(calculate_whole_file_hash),
+        system::System::WonderSwan => Some(calculate_whole_file_hash),
     }
 }
 
 fn calculate_whole_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
     if file_path.ends_with(".zip") {
-        // get first file from zip
         let mut zip_file_archive = zip::ZipArchive::new(File::open(file_path)?)?;
         if zip_file_archive.len() == 0 {
             return Err("ZIP archive is empty".into());

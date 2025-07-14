@@ -1,11 +1,15 @@
-use std::{collections::HashMap, thread, time};
+use std::{collections::HashMap, fs::File, thread, time};
+use strum::IntoEnumIterator;
 use toml;
 use tabled::{Table, settings::Style, Tabled};
 
 use rust_fuzzy_search::{fuzzy_search_best_n};
 use serde::{Deserialize, Serialize};
 
+use crate::system::get_system_ra_name;
+
 mod rom_hashes;
+mod system;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct UserConfig {
@@ -44,10 +48,10 @@ struct RAGameResponse {
     num_achievements: u32,
     num_leaderboards: u32,
     points: u32,
-    date_modified: String,
+    date_modified: Option<String>,
 
     #[serde(rename = "ForumTopicID")]
-    forum_topic_id: u32,
+    forum_topic_id: Option<u32>,
     hashes: Vec<String>,
 }
 
@@ -69,7 +73,8 @@ struct Rom<'a> {
     hash: Option<String>,
     matched_game: Option<&'a RAGameResponse>,
     hash_matches: bool,
-    system_id: Option<u32>,
+    system: Option<system::System>,
+    path: std::path::PathBuf,
 }
 
 fn download_game_list_for_system(http_client: &reqwest::blocking::Client, api_key: &str, system_id: u32) -> Result<(), reqwest::Error> {
@@ -120,6 +125,48 @@ struct TableRecord {
     hash_status: String,
 }
 
+fn determine_rom_system(file_path: &str) -> Option<system::System> {
+    let path = std::path::Path::new(file_path);
+
+    if !path.exists() || !path.is_file() {
+        return None;
+    }
+
+    let extension = path.extension()?.to_str()?.to_lowercase();
+
+    // Check extension first
+    for system in system::System::iter() {
+        let extensions = system::get_system_file_extension(system);
+
+        if extensions.contains(&extension) {
+            return Some(system);
+        }
+    }
+
+    // If it's a zip, check the contents
+    if extension == "zip" {
+        let mut zip_file_archive = match zip::ZipArchive::new(File::open(file_path).ok()?) {
+            Ok(archive) => archive,
+            Err(_) => return None,
+        };
+
+        for i in 0..zip_file_archive.len() {
+            let file = zip_file_archive.by_index(i).ok()?;
+            if let Some(extension) = file.name().rsplit('.').next() {
+                for system in system::System::iter() {
+                    let extensions = system::get_system_file_extension(system);
+
+                    if extensions.contains(&extension.to_lowercase()) {
+                        return Some(system);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn main() {
     let user_config = get_user_config();
 
@@ -137,16 +184,9 @@ fn main() {
     let system_ids_file_content = std::fs::read_to_string("data/system_ids.json").expect("Unable to read system IDs file");
     let system_ids: Vec<RASystemListResponse> = serde_json::from_str(&system_ids_file_content).expect("Failed to parse system IDs JSON");
 
-    // TODO: less hardcoding somehow.
-    // The problem is that the folder names don't match the retroachievements system names.
-    // For instance: the DS folder is called "nds" but the RA system name is "Nintendo DS".
-    let system_name_to_id = HashMap::from([
-        ("nds", 18),
-        ("gba", 5),
-        ("gbc", 6),
-        ("wonderswan", 53),
-        ("wonderswancolor", 53)
-    ]);
+    let system_name_to_id: HashMap<String, u32> = system_ids.iter()
+        .map(|system| (system.name.clone(), system.id))
+        .collect();
 
     // Download game lists for each system
     for system in &system_ids {
@@ -166,6 +206,7 @@ fn main() {
 
         let file_name = format!("data/system_games_{}.json", system_id);
         let file_content = std::fs::read_to_string(&file_name).expect("Unable to read file");
+        println!("Parsing game list for system ID {} from file: {}", system_id, file_name);
         let ra_game: Vec<RAGameResponse> = serde_json::from_str(&file_content).expect("Failed to parse JSON");
 
         system_ids_to_games.insert(*system_id as i32, ra_game);
@@ -180,44 +221,42 @@ fn main() {
         let path = entry.path();
 
         if path.is_file() {
-            let system_string = path.parent().unwrap().file_name().unwrap().to_str().unwrap();
+            let file_name = path.file_name();
 
-            let hashing_function =
-            match rom_hashes::get_hash_function(system_string) {
-                Some(func) => func,
-                None => {
-                    eprintln!("No hashing function found for system '{}'. Skipping file: {}", system_string, path.display());
-                    continue;
-                }
-            };
-
-            if system_name_to_id.get(system_string).is_none() {
-                eprintln!("System '{}' is not supported. Skipping file: {}", system_string, path.display());
-                continue;
-            }
+            let system = determine_rom_system(path.to_str().unwrap());
 
             let rom = Rom {
-                file_name: path.file_name().unwrap().to_str().unwrap().to_string(),
-                hash: match hashing_function(path.to_str().unwrap()) {
-                    Ok(hash) => Some(hash),
-                    Err(_) => None,
-                },
+                path: path.to_path_buf(),
+                file_name: file_name.unwrap_or_default().to_string_lossy().to_string(),
+                hash: None,
                 matched_game: None,
                 hash_matches: false,
-                system_id: system_name_to_id.get(system_string).cloned(),
+                system: system,
             };
 
             roms.push(rom);
         }
     }
 
-     for rom in &mut roms {
-        println!("Checking ROM: {}", rom.file_name);
+    for rom in &mut roms {
+        if rom.system.is_none() {
+            continue;
+        }
 
-        let system_games = match rom.system_id {
-            Some(id) => system_ids_to_games.get(&(id as i32)),
-            None => continue,
-        };
+        let system_name = get_system_ra_name(rom.system.unwrap());
+        let system_id = system_name_to_id.get(system_name).cloned();
+
+        if system_id.is_none() {
+            println!("System ID for {} not found, skipping ROM: {}", system_name, rom.file_name);
+            continue;
+        }
+
+        let system_games = system_ids_to_games.get(&(system_id.unwrap() as i32));
+
+        if system_games.is_none() {
+            println!("No games found for system ID {} ({})", system_id.unwrap(), system_name);
+            continue;
+        }
 
         let game_titles: Vec<&str> = system_games.unwrap().iter()
             .map(|game| game.title.as_str())
@@ -242,6 +281,17 @@ fn main() {
             if let Some(game) = system_games.unwrap().iter().find(|g| g.title == title) {
                 rom.matched_game = Some(&game);
 
+                if let Some(system) = rom.system {
+                    if let Some(hash_function) = rom_hashes::get_hash_function(&system) {
+                        rom.hash = hash_function(rom.path.to_str().unwrap()).ok();
+                    }
+                }
+
+                if rom.hash.is_none() {
+                    println!("Hash for ROM {} could not be calculated.", rom.file_name);
+                    break 'search;
+                }
+
                 for hash in game.hashes.iter() {
                     if rom.hash == Some(hash.clone()) {
                         rom.hash_matches = true;
@@ -264,10 +314,10 @@ fn main() {
             true => "✅".to_string(),
             false => "❌".to_string(),
         },
-        system: match rom.system_id {
-            Some(id) => {
-                system_ids.iter().find(|system| system.id == id)
-                    .map_or("Unknown".to_string(), |system| system.name.clone())
+        system: match rom.system {
+            Some(system) => {
+                let system_name = get_system_ra_name(system);
+                system_name.to_string()
             },
             None => "Unknown".to_string(),
         }
