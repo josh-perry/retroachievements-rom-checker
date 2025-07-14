@@ -1,4 +1,6 @@
-use strum::{EnumIter};
+use std::fs::File;
+
+use strum::{EnumIter,IntoEnumIterator};
 
 #[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, EnumIter)]
 pub enum System {
@@ -27,4 +29,46 @@ pub fn get_system_ra_name(system: System) -> &'static str {
         System::GBC => "Game Boy Color",
         System::WonderSwan => "WonderSwan",
     }
+}
+
+pub fn determine_rom_system(file_path: &str) -> Option<System> {
+    let path = std::path::Path::new(file_path);
+
+    if !path.exists() || !path.is_file() {
+        return None;
+    }
+
+    let extension = path.extension()?.to_str()?.to_lowercase();
+
+    // Check extension first
+    for system in System::iter() {
+        let extensions = get_system_file_extension(system);
+
+        if extensions.contains(&extension) {
+            return Some(system);
+        }
+    }
+
+    // If it's a zip, check the contents
+    if extension == "zip" {
+        let mut zip_file_archive = match zip::ZipArchive::new(File::open(file_path).ok()?) {
+            Ok(archive) => archive,
+            Err(_) => return None,
+        };
+
+        for i in 0..zip_file_archive.len() {
+            let file = zip_file_archive.by_index(i).ok()?;
+            if let Some(extension) = file.name().rsplit('.').next() {
+                for system in System::iter() {
+                    let extensions = get_system_file_extension(system);
+
+                    if extensions.contains(&extension.to_lowercase()) {
+                        return Some(system);
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }

@@ -1,12 +1,11 @@
-use std::{collections::HashMap, fs::File, thread, time};
-use strum::IntoEnumIterator;
+use std::{collections::HashMap, thread, time};
 use toml;
 use tabled::{Table, settings::Style, Tabled};
 
 use rust_fuzzy_search::{fuzzy_search_best_n};
 use serde::{Deserialize, Serialize};
 
-use crate::system::get_system_ra_name;
+use crate::system::{determine_rom_system, get_system_ra_name};
 
 mod rom_hashes;
 mod system;
@@ -81,7 +80,6 @@ fn download_game_list_for_system(http_client: &reqwest::blocking::Client, api_ke
     let file_name = format!("data/system_games_{}.json", system_id);
 
     if std::path::Path::new(&file_name).exists() {
-        println!("File {} already exists, skipping download.", file_name);
         return Ok(());
     }
 
@@ -101,7 +99,6 @@ fn download_game_system_ids(http_client: &reqwest::blocking::Client, api_key: &s
     let api_url = &format!("https://retroachievements.org/API/API_GetConsoleIDs.php?y={}", api_key);
 
     if std::path::Path::new("data/system_ids.json").exists() {
-        println!("File data/system_ids.json already exists, skipping download.");
         return Ok(());
     }
 
@@ -123,48 +120,6 @@ struct TableRecord {
 
     #[tabled(rename = "Hash match?")]
     hash_status: String,
-}
-
-fn determine_rom_system(file_path: &str) -> Option<system::System> {
-    let path = std::path::Path::new(file_path);
-
-    if !path.exists() || !path.is_file() {
-        return None;
-    }
-
-    let extension = path.extension()?.to_str()?.to_lowercase();
-
-    // Check extension first
-    for system in system::System::iter() {
-        let extensions = system::get_system_file_extension(system);
-
-        if extensions.contains(&extension) {
-            return Some(system);
-        }
-    }
-
-    // If it's a zip, check the contents
-    if extension == "zip" {
-        let mut zip_file_archive = match zip::ZipArchive::new(File::open(file_path).ok()?) {
-            Ok(archive) => archive,
-            Err(_) => return None,
-        };
-
-        for i in 0..zip_file_archive.len() {
-            let file = zip_file_archive.by_index(i).ok()?;
-            if let Some(extension) = file.name().rsplit('.').next() {
-                for system in system::System::iter() {
-                    let extensions = system::get_system_file_extension(system);
-
-                    if extensions.contains(&extension.to_lowercase()) {
-                        return Some(system);
-                    }
-                }
-            }
-        }
-    }
-
-    None
 }
 
 fn main() {
@@ -191,7 +146,7 @@ fn main() {
     // Download game lists for each system
     for system in &system_ids {
         match download_game_list_for_system(&http_client, user_config.api_key.as_str(), system.id) {
-            Ok(_) => println!("Game list downloaded successfully."),
+            Ok(_) => continue,
             Err(e) => eprintln!("Failed to download game list: {}", e),
         }
     }
@@ -200,13 +155,11 @@ fn main() {
 
     for system_id in system_name_to_id.values() {
         if !std::path::Path::new(&format!("data/system_games_{}.json", system_id)).exists() {
-            eprintln!("Game list for system ID {} does not exist. Skipping.", system_id);
             continue;
         }
 
         let file_name = format!("data/system_games_{}.json", system_id);
         let file_content = std::fs::read_to_string(&file_name).expect("Unable to read file");
-        println!("Parsing game list for system ID {} from file: {}", system_id, file_name);
         let ra_game: Vec<RAGameResponse> = serde_json::from_str(&file_content).expect("Failed to parse JSON");
 
         system_ids_to_games.insert(*system_id as i32, ra_game);
@@ -247,14 +200,12 @@ fn main() {
         let system_id = system_name_to_id.get(system_name).cloned();
 
         if system_id.is_none() {
-            println!("System ID for {} not found, skipping ROM: {}", system_name, rom.file_name);
             continue;
         }
 
         let system_games = system_ids_to_games.get(&(system_id.unwrap() as i32));
 
         if system_games.is_none() {
-            println!("No games found for system ID {} ({})", system_id.unwrap(), system_name);
             continue;
         }
 
@@ -268,6 +219,7 @@ fn main() {
             5,
         );
 
+        // TODO: search for hash first?
         'search: for (title, score) in search_results {
             if score < 0.4 {
                 continue;
