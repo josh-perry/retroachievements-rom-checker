@@ -14,6 +14,7 @@ pub fn get_hash_function(system: &system::System) -> Option<fn(&str) -> Result<S
         system::System::GBA => Some(calculate_whole_file_hash),
         system::System::GBC => Some(calculate_whole_file_hash),
         system::System::GB => Some(calculate_whole_file_hash),
+        system::System::SNES => Some(calculate_snes_file_hash),
         system::System::WonderSwan => Some(calculate_whole_file_hash),
     }
 }
@@ -102,6 +103,25 @@ fn calculate_nds_file_hash(file_path: &str) -> Result<String, Box<dyn std::error
     hasher.consume(&arm9_data);
     hasher.consume(&arm7_data);
     hasher.consume(&icon_title_data);
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn calculate_snes_file_hash(file_path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    // If the size of the file is 512 bytes more than a multiple of 8KB, the first 512 bytes are ignored and the remaining file contents are hashed.
+    // If the size of the file is not 512 bytes more than a multiple of 8KB, the entire file is hashed.
+
+    let mut file = File::open(file_path)?;
+    let file_size = file.metadata()?.len();
+
+    let mut hasher = md5::Context::new();
+    if file_size % 8192 == 512 {
+        file.seek(SeekFrom::Start(512))?;
+    }
+
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+    hasher.consume(&buffer);
 
     Ok(format!("{:x}", hasher.finalize()))
 }

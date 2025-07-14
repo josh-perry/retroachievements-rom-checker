@@ -81,7 +81,7 @@ roms_folder = "/path/to/roms/root"
 | SG-1000                     | ❌        |
 | Sharp X1                    | ❌        |
 | Sharp X68000                | ❌        |
-| SNES/Super Famicom          | ❌        |
+| SNES/Super Famicom          | ✅        |
 | Standalone                  | ❌        |
 | Super Cassette Vision       | ❌        |
 | Thomson TO8                 | ❌        |

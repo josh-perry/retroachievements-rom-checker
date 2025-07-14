@@ -8,6 +8,7 @@ pub enum System {
     GBA,
     GBC,
     GB,
+    SNES,
     WonderSwan
 }
 
@@ -17,6 +18,7 @@ pub fn get_system_file_extension(system: System) -> Vec<String> {
         System::GBA => vec!["gba".to_string()],
         System::GBC => vec!["gbc".to_string()],
         System::GB => vec!["gb".to_string()],
+        System::SNES => vec!["sfc".to_string(), "smc".to_string()],
         System::WonderSwan => vec!["ws".to_string(), "wsc".to_string()],
     }
 }
@@ -27,6 +29,7 @@ pub fn get_system_ra_name(system: System) -> &'static str {
         System::GBA => "Game Boy Advance",
         System::GB => "Game Boy",
         System::GBC => "Game Boy Color",
+        System::SNES => "SNES/Super Famicom",
         System::WonderSwan => "WonderSwan",
     }
 }
